@@ -1,0 +1,453 @@
+import sqlite3
+import tkinter as tk
+from tkinter import ttk, messagebox
+from datetime import datetime
+
+# Configurare baza de date
+def setup_database():
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS books (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        author TEXT NOT NULL,
+                        status TEXT DEFAULT 'Disponibila')''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        email TEXT NOT NULL)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS loans (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        book_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        loan_date TEXT NOT NULL,
+                        return_date TEXT,
+                        FOREIGN KEY(book_id) REFERENCES books(id),
+                        FOREIGN KEY(user_id) REFERENCES users(id))''')
+    conn.commit()
+    conn.close()
+
+
+# Funcții pentru gestiunea cărților
+def add_book(title, author):
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO books (title, author) VALUES (?, ?)", (title, author))
+    conn.commit()
+    conn.close()
+
+def delete_book(book_id):
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM books WHERE id = ?", (book_id,))
+    conn.commit()
+    conn.close()
+
+def get_books():
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM books")
+    books = cursor.fetchall()
+    conn.close()
+    return books
+
+
+# Funcții pentru gestiunea utilizatorilor
+def add_user(name, email):
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO users (name, email) VALUES (?, ?)", (name, email))
+    conn.commit()
+    conn.close()
+
+def delete_user(user_id):
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def get_users():
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users")
+    users = cursor.fetchall()
+    conn.close()
+    return users
+
+
+# Funcții pentru gestiunea împrumuturilor
+def loan_book(book_id, user_id, loan_date):
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE books SET status = 'Imprumutat' WHERE id = ?", (book_id,))
+    cursor.execute("INSERT INTO loans (book_id, user_id, loan_date) VALUES (?, ?, ?)",
+                   (book_id, user_id, loan_date))
+    conn.commit()
+    conn.close()
+
+def return_book(book_id, return_date):
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT loan_date FROM loans WHERE book_id = ? AND return_date IS NULL", (book_id,))
+    loan_data = cursor.fetchone()
+    if not loan_data:
+        messagebox.showerror("Eroare", "Nu s-a găsit un împrumut activ pentru această carte!")
+        conn.close()
+        return
+
+    loan_date = datetime.strptime(loan_data[0], "%d.%m.%Y")
+    return_date_obj = datetime.strptime(return_date, "%d.%m.%Y")
+
+    if return_date_obj < loan_date:
+        messagebox.showerror("Eroare", "Data returnării nu poate fi anterioară datei împrumutului!")
+        conn.close()
+        return
+
+    cursor.execute("UPDATE books SET status = 'Disponibila' WHERE id = ?", (book_id,))
+    cursor.execute("UPDATE loans SET return_date = ? WHERE book_id = ? AND return_date IS NULL",
+                   (return_date, book_id))
+    conn.commit()
+    conn.close()
+
+def get_loans():
+    conn = sqlite3.connect('library.db')
+    cursor = conn.cursor()
+    cursor.execute('''SELECT loans.id, books.title, users.name, loans.loan_date, loans.return_date
+                      FROM loans
+                      JOIN books ON loans.book_id = books.id
+                      JOIN users ON loans.user_id = users.id''')
+    loans = cursor.fetchall()
+    conn.close()
+    return loans
+
+
+# Interfața grafică
+def manage_books(root):
+    def refresh_books(search_query=None):
+        for row in book_tree.get_children():
+            book_tree.delete(row)
+        books = get_books()
+        if search_query:
+            books = [book for book in books if search_query.lower() in book[1].lower()]
+        for book in books:
+            book_tree.insert("", "end", values=book)
+
+    def save_book():
+        title = entry_title.get()
+        author = entry_author.get()
+        if title and author:
+            add_book(title, author)
+            entry_title.delete(0, tk.END)
+            entry_author.delete(0, tk.END)
+            refresh_books()
+            messagebox.showinfo("Succes", "Cartea a fost adăugată cu succes!")
+        else:
+            messagebox.showwarning("Eroare", "Toate câmpurile sunt obligatorii!")
+
+    def delete_selected_book():
+        selected_item = book_tree.selection()
+        if not selected_item:
+            messagebox.showwarning("Eroare", "Selectați o carte pentru ștergere!")
+            return
+        book_values = book_tree.item(selected_item, "values")
+        book_id = book_values[0]
+        delete_book(book_id)
+        refresh_books()
+        messagebox.showinfo("Succes", "Cartea a fost ștearsă cu succes!")
+
+    def search_books():
+        query = search_entry.get()
+        refresh_books(query)
+
+    window = tk.Toplevel(root)
+    window.title("Gestionare cărți")
+    center_window(window, 822, 450)
+    window.transient(root)
+    window.grab_set()
+    window.focus_set()
+
+    ttk.Label(window, text="Titlu:").grid(row=0, column=0, padx=10, pady=10)
+    entry_title = tk.Entry(window)
+    entry_title.grid(row=0, column=1, padx=10, pady=10)
+
+    ttk.Label(window, text="Autor:").grid(row=1, column=0, padx=10, pady=10)
+    entry_author = tk.Entry(window)
+    entry_author.grid(row=1, column=1, padx=10, pady=10)
+
+    ttk.Button(window, text="Adaugă carte", command=save_book).grid(row=2, column=0, columnspan=2, pady=20)
+
+    # Adăugăm butonul de ștergere pentru fiecare carte
+    ttk.Button(window, text="Șterge carte", command=delete_selected_book).grid(row=2, column=1, columnspan=2, pady=20)
+
+    # Căutare
+    ttk.Label(window, text="Căutare:").grid(row=3, column=0, padx=10, pady=10)
+    search_entry = tk.Entry(window)
+    search_entry.grid(row=3, column=1, padx=10, pady=10)
+    ttk.Button(window, text="Caută", command=search_books).grid(row=3, column=2, padx=10, pady=10)
+
+    # Afișare cărți existente
+    book_tree = ttk.Treeview(window, columns=("ID", "Titlu", "Autor", "Status"), show="headings")
+    book_tree.heading("ID", text="ID")
+    book_tree.heading("Titlu", text="Titlu")
+    book_tree.heading("Autor", text="Autor")
+    book_tree.heading("Status", text="Status")
+    book_tree.grid(row=4, column=0, columnspan=3, padx=10, pady=10)
+
+    refresh_books()
+
+    window.protocol("WM_DELETE_WINDOW", lambda: (window.grab_release(), window.destroy()))
+
+def manage_users(root):
+    def refresh_users(search_query=None):
+        for row in user_tree.get_children():
+            user_tree.delete(row)
+        users = get_users()
+        if search_query:
+            users = [user for user in users if search_query.lower() in user[1].lower() or search_query.lower() in user[2].lower()]
+        for user in users:
+            user_tree.insert("", "end", values=user)
+
+    def delete_selected_user():
+        selected_item = user_tree.selection()
+        if not selected_item:
+            messagebox.showwarning("Eroare", "Selectați un utilizator pentru ștergere!")
+            return
+        user_values = user_tree.item(selected_item, "values")
+        user_id = user_values[0]
+        delete_user(user_id)
+        refresh_users()
+        messagebox.showinfo("Succes", "Utilizatorul a fost șters cu succes!")
+
+    def save_user():
+        name = entry_name.get()
+        email = entry_email.get()
+        if name and email:
+            add_user(name, email)
+            entry_name.delete(0, tk.END)
+            entry_email.delete(0, tk.END)
+            refresh_users()
+            messagebox.showinfo("Succes", "Utilizatorul a fost adăugat cu succes!")
+        else:
+            messagebox.showwarning("Eroare", "Toate câmpurile sunt obligatorii!")
+
+    def search_users():
+        query = search_entry.get()
+        refresh_users(query)
+
+    window = tk.Toplevel(root)
+    window.title("Gestionare utilizatori")
+    center_window(window, 622, 440)
+    window.transient(root)  # Face fereastra dependentă de fereastra principală
+    window.grab_set()  # Blochează interacțiunea cu fereastra principală
+    window.focus_set()
+
+    ttk.Label(window, text="Nume:").grid(row=0, column=0, padx=10, pady=10)
+    entry_name = tk.Entry(window)
+    entry_name.grid(row=0, column=1, padx=10, pady=10)
+
+    ttk.Label(window, text="Email:").grid(row=1, column=0, padx=10, pady=10)
+    entry_email = tk.Entry(window)
+    entry_email.grid(row=1, column=1, padx=10, pady=10)
+
+    ttk.Button(window, text="Adaugă utilizator", command=save_user).grid(row=2, column=0, columnspan=2, pady=20)
+
+    # Căutare
+    ttk.Label(window, text="Căutare:").grid(row=3, column=0, padx=10, pady=10)
+    search_entry = tk.Entry(window)
+    search_entry.grid(row=3, column=1, padx=10, pady=10)
+    ttk.Button(window, text="Caută", command=search_users).grid(row=3, column=2, padx=10, pady=10)
+
+    # Afișare utilizatori existenți
+    user_tree = ttk.Treeview(window, columns=("ID", "Nume", "Email"), show="headings")
+    user_tree.heading("ID", text="ID")
+    user_tree.heading("Nume", text="Nume")
+    user_tree.heading("Email", text="Email")
+    user_tree.grid(row=4, column=0, columnspan=3, padx=10, pady=10)
+
+    # Adăugăm butonul de ștergere pentru fiecare utilizator
+    ttk.Button(window, text="Șterge utilizator", command=delete_selected_user).grid(row=2, column=1, columnspan=2,
+                                                                                    pady=20)
+
+    refresh_users()
+
+    window.protocol("WM_DELETE_WINDOW", lambda: (window.grab_release(), window.destroy()))
+
+def manage_loans(root):
+    def refresh_loans(search_query=None):
+        for row in loan_tree.get_children():
+            loan_tree.delete(row)
+        loans = get_loans()
+        if search_query:
+            loans = [loan for loan in loans if
+                     search_query.lower() in loan[1].lower() or search_query.lower() in loan[2].lower()]
+        for loan in loans:
+            loan_tree.insert("", "end", values=loan)
+
+    def refresh_books():
+        """Actualizează lista cărților disponibile."""
+        books = get_books()
+        available_books = [(book[0], book[1]) for book in books if book[3] == 'Disponibila']
+        book_menu["values"] = [f"{book[0]} - {book[1]}" for book in available_books]
+
+    def refresh_users():
+        """Actualizează lista utilizatorilor."""
+        users = get_users()
+        user_menu["values"] = [f"{user[0]} - {user[1]}" for user in users]
+
+    def add_loan():
+        """Înregistrează un nou împrumut."""
+        book_info = book_menu.get()
+        user_info = user_menu.get()
+        loan_date = entry_loan_date.get()
+
+        if not (book_info and user_info and loan_date):
+            messagebox.showwarning("Eroare", "Toate câmpurile sunt obligatorii!")
+            return
+
+        book_id = book_info.split(" - ")[0]
+        user_id = user_info.split(" - ")[0]
+
+        loan_book(book_id, user_id, loan_date)
+        refresh_books()
+        refresh_loans()
+        messagebox.showinfo("Succes", "Împrumutul a fost înregistrat cu succes!")
+
+    def return_loan():
+        """Înregistrează returnarea unei cărți."""
+        selected_item = loan_tree.selection()  # Selectăm elementul curent
+        if not selected_item:
+            messagebox.showwarning("Eroare", "Selectați un împrumut pentru returnare!")
+            return
+
+        loan_values = loan_tree.item(selected_item, "values")
+        loan_id = loan_values[0]  # Preluăm ID-ul împrumutului
+        book_title = loan_values[1]  # Preluăm titlul cărții pentru confirmare
+        return_date = entry_return_date.get()
+
+        if not return_date:
+            messagebox.showwarning("Eroare", "Introduceți data returnării!")
+            return
+
+        # Extragem `book_id` din baza de date, utilizând titlul cărții
+        conn = sqlite3.connect('library.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM books WHERE title = ?", (book_title,))
+        book_data = cursor.fetchone()
+        if not book_data:
+            messagebox.showerror("Eroare", "Cartea selectată nu există în baza de date!")
+            conn.close()
+            return
+        book_id = book_data[0]
+
+        # Actualizăm statusul cărții și data returnării
+        try:
+            cursor.execute("UPDATE books SET status = 'Disponibila' WHERE id = ?", (book_id,))
+            cursor.execute("UPDATE loans SET return_date = ? WHERE id = ?", (return_date, loan_id))
+            conn.commit()
+            messagebox.showinfo("Succes", "Cartea a fost returnată cu succes!")
+        except sqlite3.Error as e:
+            messagebox.showerror("Eroare", f"A apărut o eroare la actualizarea bazei de date: {e}")
+        finally:
+            conn.close()
+
+        # Actualizăm interfața
+        refresh_books()
+        refresh_loans()
+
+    def search_loans():
+        query = search_entry.get()
+        refresh_loans(query)
+
+    window = tk.Toplevel(root)
+    window.title("Gestionare împrumuturi")
+    center_window(window, 1100, 450)
+    window.transient(root)
+    window.grab_set()
+    window.focus_set()
+
+    # Configurarea grilei pentru a evita suprapunerea
+    window.columnconfigure(0, weight=1)
+    window.columnconfigure(1, weight=1)
+    window.columnconfigure(2, weight=1)
+    window.rowconfigure(1, weight=1)
+
+    # Form pentru împrumuturi
+    ttk.Label(window, text="Carte:").grid(row=0, column=0, padx=10, pady=5)
+    book_menu = ttk.Combobox(window, width=30, state="readonly")
+    book_menu.grid(row=0, column=1, padx=10, pady=5)
+
+    ttk.Label(window, text="Utilizator:").grid(row=1, column=0, padx=10, pady=5)
+    user_menu = ttk.Combobox(window, width=30, state="readonly")
+    user_menu.grid(row=1, column=1, padx=10, pady=5)
+
+    ttk.Label(window, text="Data împrumutului:").grid(row=2, column=0, padx=10, pady=5)
+    entry_loan_date = tk.Entry(window)
+    entry_loan_date.grid(row=2, column=1, padx=10, pady=5)
+
+    ttk.Button(window, text="Adaugă împrumut", command=add_loan).grid(row=2, column=1, columnspan=2, pady=10)
+
+    # Form pentru returnări
+    ttk.Label(window, text="Data returnării:").grid(row=4, column=0, padx=10, pady=5)
+    entry_return_date = tk.Entry(window)
+    entry_return_date.grid(row=4, column=1, padx=10, pady=5)
+
+    ttk.Button(window, text="Returnează cartea", command=return_loan).grid(row=4, column=1, columnspan=2, pady=10)
+
+    # Căutare (mutată într-un rând separat)
+    ttk.Label(window, text="Căutare împrumuturi:").grid(row=6, column=0, padx=10, pady=10, sticky="w")
+    search_entry = tk.Entry(window)
+    search_entry.grid(row=6, column=1, padx=10, pady=10, sticky="ew")
+    ttk.Button(window, text="Caută", command=search_loans).grid(row=6, column=2, padx=10, pady=10, sticky="e")
+
+    # Afișare împrumuturi
+    loan_tree = ttk.Treeview(window, columns=("ID", "Carte", "Utilizator", "Data împrumutului", "Data returnării"),
+                             show="headings")
+    loan_tree.heading("ID", text="ID")
+    loan_tree.heading("Carte", text="Carte")
+    loan_tree.heading("Utilizator", text="Utilizator")
+    loan_tree.heading("Data împrumutului", text="Data împrumutului")
+    loan_tree.heading("Data returnării", text="Data returnării")
+    loan_tree.grid(row=7, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
+
+    # Adăugarea unei bare de derulare pentru Treeview
+    scrollbar = ttk.Scrollbar(window, orient="vertical", command=loan_tree.yview)
+    loan_tree.configure(yscrollcommand=scrollbar.set)
+    scrollbar.grid(row=7, column=3, sticky="ns", padx=(0, 10))
+
+    refresh_books()
+    refresh_users()
+    refresh_loans()
+
+    window.protocol("WM_DELETE_WINDOW", lambda: (window.grab_release(), window.destroy()))
+
+def center_window(window, width, height):
+    """Centrează o fereastră pe ecran."""
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    x = (screen_width // 2) - (width // 2)
+    y = (screen_height // 2) - (height // 2)
+    window.geometry(f"{width}x{height}+{x}+{y}")
+
+# Interfața principală
+def main_window():
+    root = tk.Tk()
+    root.title("Sistem de gestionare a bibliotecii")
+
+    center_window(root, 500, 300)
+
+    ttk.Label(root, text="Sistem de gestionare a bibliotecii", font=("Arial", 16)).pack(pady=20)
+
+    ttk.Button(root, text="Gestionare cărți", command=lambda: manage_books(root), width=30).pack(pady=10)
+    ttk.Button(root, text="Gestionare utilizatori", command=lambda: manage_users(root), width=30).pack(pady=10)
+    ttk.Button(root, text="Gestionare împrumuturi", command=lambda: manage_loans(root), width=30).pack(pady=10)
+    ttk.Button(root, text="Ieșire", command=root.destroy, width=30).pack(pady=10)
+
+    root.mainloop()
+
+
+# Configurare inițială
+if __name__ == "__main__":
+    setup_database()
+    main_window()
+
